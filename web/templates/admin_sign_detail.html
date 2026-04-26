@@ -22,7 +22,7 @@
             <td><span class="status-badge status-{{.Status}}" id="status-{{.ID}}">{{.Status}}</span></td>
             <td class="actions-cell">
                 {{if eq .Status "pending"}}
-                <a href="{{.DownloadURL}}" class="btn btn-sm btn-primary" target="_blank">下载源文件</a>
+                <a href="{{index $.Data.DownloadURLs .ID}}" class="btn btn-sm btn-primary" target="_blank">下载源文件</a>
                 <button class="btn btn-sm btn-success" onclick="uploadSigned('{{.ID}}')">上传已签</button>
                 <button class="btn btn-sm btn-danger" onclick="markFailed('{{.ID}}')">标记失败</button>
                 <input type="file" id="signed-input-{{.ID}}" style="display:none" onchange="doUploadSigned('{{.ID}}', this.files[0])">
@@ -31,7 +31,7 @@
                     <span id="ptext-{{.ID}}">0%</span>
                 </div>
                 {{else if eq .Status "signed"}}
-                {{if .DownloadURL}}<a href="{{.DownloadURL}}" class="btn btn-sm btn-success" target="_blank">下载已签文件</a>{{end}}
+                {{$signedURL := index $.Data.DownloadURLs .ID}}{{if $signedURL}}<a href="{{$signedURL}}" class="btn btn-sm btn-success" target="_blank">下载已签文件</a>{{end}}
                 {{if .SignedSizeBytes}}<span class="text-secondary">{{formatSize (deref .SignedSizeBytes)}}</span>{{end}}
                 {{else}}
                 {{if .FailReason}}<span class="text-secondary">原因: {{deref .FailReason}}</span>{{end}}

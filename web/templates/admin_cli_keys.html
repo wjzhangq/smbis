@@ -1,0 +1,40 @@
+{{define "content"}}
+<h2>CLI Key 管理</h2>
+<div class="form-card mb-3">
+    <h3>创建 CLI Key</h3>
+    <form id="createKeyForm" class="inline-form">
+        <input type="text" id="keyName" placeholder="Key 名称" required>
+        <button type="submit" class="btn btn-primary">创建</button>
+    </form>
+</div>
+<table class="table">
+    <thead><tr><th>名称</th><th>Key</th><th>创建时间</th><th>最后使用</th><th>状态</th><th>操作</th></tr></thead>
+    <tbody>
+    {{range .Data.Keys}}
+    <tr>
+        <td>{{.Name}}</td>
+        <td><code class="mono key-value">{{.KeyValue}}</code> <button class="btn btn-sm btn-outline" onclick="copyToClipboard('{{.KeyValue}}', this)">复制</button></td>
+        <td>{{formatTime .CreatedAt}}</td>
+        <td>{{if .LastUsedAt}}{{formatTime (deref .LastUsedAt)}}{{else}}从未{{end}}</td>
+        <td>{{if .RevokedAt}}<span class="status-badge status-canceled">已吊销</span>{{else}}<span class="status-badge status-done">活跃</span>{{end}}</td>
+        <td>{{if not .RevokedAt}}<button class="btn btn-sm btn-danger" onclick="revokeKey('{{.ID}}')">吊销</button>{{end}}</td>
+    </tr>
+    {{end}}
+    </tbody>
+</table>
+<script>
+document.getElementById('createKeyForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    try {
+        const res = await apiCall('POST', '/api/admin/cli-keys', { name: document.getElementById('keyName').value });
+        showToast('Key 已创建: ' + res.key_value, 'success');
+        setTimeout(() => location.reload(), 2000);
+    } catch(e) { showToast(e.message, 'error'); }
+});
+async function revokeKey(id) {
+    if (!confirm('确认吊销此 Key?')) return;
+    try { await apiCall('DELETE', '/api/admin/cli-keys/' + id); location.reload(); } catch(e) { showToast(e.message, 'error'); }
+}
+</script>
+{{end}}
+{{template "layout" .}}

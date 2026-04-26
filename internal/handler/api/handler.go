@@ -527,15 +527,35 @@ func (h *Handler) ResetUserPassword(w http.ResponseWriter, r *http.Request) {
 }
 
 // DisableUser handles POST /api/admin/users/{id}/disable.
+//
+// Body: {"disabled": true} or {"disabled": false}
 func (h *Handler) DisableUser(w http.ResponseWriter, r *http.Request) {
 	userID := chi.URLParam(r, "id")
 
-	if err := h.store.SetUserDisabled(r.Context(), userID, true); err != nil {
+	var body struct {
+		Disabled *bool `json:"disabled"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	// Default to true (disable) when no body is provided, for backward compatibility.
+	disabled := true
+	if body.Disabled != nil {
+		disabled = *body.Disabled
+	}
+
+	if err := h.store.SetUserDisabled(r.Context(), userID, disabled); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	middleware.AuditLog(r, "admin.disable_user", userID)
+	action := "admin.disable_user"
+	if !disabled {
+		action = "admin.enable_user"
+	}
+	middleware.AuditLog(r, action, userID)
 	w.WriteHeader(http.StatusNoContent)
 }
 

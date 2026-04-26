@@ -42,6 +42,7 @@ type Store interface {
 	CreateUploadDraft(ctx context.Context, d *model.UploadDraft) error
 	GetUploadDraft(ctx context.Context, id string) (*model.UploadDraft, error)
 	UpdateUploadDraftParts(ctx context.Context, id, partsJSON string) error
+	AppendUploadDraftPart(ctx context.Context, id string, partNumber int, etag string) error
 	DeleteUploadDraft(ctx context.Context, id string) error
 }
 
@@ -168,8 +169,8 @@ func (s *Service) InitFileUpload(ctx context.Context, requestID, userID, fileNam
 	}, nil
 }
 
-// UploadPart forwards a single part of a multipart upload to OSS and persists
-// the resulting ETag in the draft's parts list.
+// UploadPart forwards a single part of a multipart upload to OSS and atomically
+// appends the resulting ETag in the draft's parts list.
 func (s *Service) UploadPart(ctx context.Context, draftID string, partNumber int, reader io.Reader, size int64) (string, error) {
 	draft, err := s.store.GetUploadDraft(ctx, draftID)
 	if err != nil {
@@ -184,22 +185,9 @@ func (s *Service) UploadPart(ctx context.Context, draftID string, partNumber int
 		return "", fmt.Errorf("sign: upload part %d: %w", partNumber, err)
 	}
 
-	// Deserialise current parts list, append, and serialise back.
-	var parts []ossstore.UploadPart
-	if draft.UploadedParts != "" && draft.UploadedParts != "[]" {
-		if err := json.Unmarshal([]byte(draft.UploadedParts), &parts); err != nil {
-			return "", fmt.Errorf("sign: parse uploaded parts: %w", err)
-		}
-	}
-	parts = append(parts, ossstore.UploadPart{PartNumber: partNumber, ETag: etag})
-
-	partsJSON, err := json.Marshal(parts)
-	if err != nil {
-		return "", fmt.Errorf("sign: marshal uploaded parts: %w", err)
-	}
-
-	if err := s.store.UpdateUploadDraftParts(ctx, draftID, string(partsJSON)); err != nil {
-		return "", fmt.Errorf("sign: update upload draft parts: %w", err)
+	// Atomically append the part to the draft's parts list.
+	if err := s.store.AppendUploadDraftPart(ctx, draftID, partNumber, etag); err != nil {
+		return "", fmt.Errorf("sign: append upload draft part: %w", err)
 	}
 
 	return etag, nil
@@ -207,7 +195,8 @@ func (s *Service) UploadPart(ctx context.Context, draftID string, partNumber int
 
 // CompleteFileUpload finalises a multipart upload, creates the sign_file record
 // in the database, and deletes the draft. The returned SignFile represents the
-// newly persisted file.
+// newly persisted file. The requestID is validated against the draft's OSS key
+// to prevent cross-request file injection.
 func (s *Service) CompleteFileUpload(ctx context.Context, draftID, requestID, userID string) (*model.SignFile, error) {
 	draft, err := s.store.GetUploadDraft(ctx, draftID)
 	if err != nil {
@@ -215,6 +204,12 @@ func (s *Service) CompleteFileUpload(ctx context.Context, draftID, requestID, us
 	}
 	if draft == nil {
 		return nil, fmt.Errorf("sign: upload draft %q not found", draftID)
+	}
+
+	// Verify the draft belongs to this request by checking the OSS key pattern.
+	expectedPrefix := fmt.Sprintf("sign/%s/source/", requestID)
+	if !strings.Contains(draft.OSSKey, expectedPrefix) {
+		return nil, fmt.Errorf("sign: draft %q does not belong to request %q", draftID, requestID)
 	}
 
 	var parts []ossstore.UploadPart

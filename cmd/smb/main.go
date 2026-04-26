@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"embed"
 	"flag"
 	"fmt"
 	"html/template"
@@ -12,28 +11,24 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
-	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/chi/v5"
+	chimw "github.com/go-chi/chi/v5/middleware"
 
 	"github.com/wj/smbis/internal/config"
 	"github.com/wj/smbis/internal/handler/api"
 	"github.com/wj/smbis/internal/handler/cli"
-	"github.com/wj/smbis/internal/handler/web"
+	webhandler "github.com/wj/smbis/internal/handler/web"
 	"github.com/wj/smbis/internal/middleware"
 	"github.com/wj/smbis/internal/service/release"
 	"github.com/wj/smbis/internal/service/sign"
 	"github.com/wj/smbis/internal/store/oss"
 	"github.com/wj/smbis/internal/store/sqlite"
+	webfs "github.com/wj/smbis/web"
 )
-
-//go:embed ../../web/templates/*.html
-var templateFS embed.FS
-
-//go:embed ../../web/static
-var staticFS embed.FS
 
 func main() {
 	cfgPath := flag.String("config", "config.yaml", "path to configuration file")
@@ -143,9 +138,7 @@ func main() {
 			switch status {
 			case "pending":
 				return "yellow"
-			case "done":
-				return "green"
-			case "signed":
+			case "done", "signed":
 				return "green"
 			case "canceled":
 				return "gray"
@@ -153,22 +146,57 @@ func main() {
 				return "gray"
 			}
 		},
+		"add": func(a, b int) int {
+			return a + b
+		},
+		"upper": func(s string) string {
+			return strings.ToUpper(s)
+		},
+		"deref": func(v any) any {
+			switch p := v.(type) {
+			case *string:
+				if p == nil {
+					return ""
+				}
+				return *p
+			case *int:
+				if p == nil {
+					return 0
+				}
+				return *p
+			case *int64:
+				if p == nil {
+					return int64(0)
+				}
+				return *p
+			case *time.Time:
+				if p == nil {
+					return time.Time{}
+				}
+				return *p
+			default:
+				return v
+			}
+		},
+		"index": func(m map[string]string, key string) string {
+			return m[key]
+		},
 	}
 
 	// Parse templates from embedded FS.
-	tmpl, err := template.New("").Funcs(funcMap).ParseFS(templateFS, "web/templates/*.html")
+	tmpl, err := template.New("").Funcs(funcMap).ParseFS(webfs.TemplateFS, "templates/*.html")
 	if err != nil {
 		slog.Error("failed to parse templates", "error", err)
 		os.Exit(1)
 	}
 
 	// Init handlers.
-	webH := web.New(store, signSvc, releaseSvc, tmpl, cfg)
-	apiH := api.New(store, signSvc, releaseSvc, cfg)
-	cliH := cli.New(store, signSvc, releaseSvc, cfg)
+	webH := webhandler.New(store, signSvc, releaseSvc, cfg, tmpl)
+	apiH := api.New(store, signSvc, releaseSvc)
+	cliH := cli.New(signSvc, cfg.Server.ExternalURL)
 
 	// Get sub filesystem for static files.
-	staticSubFS, err := fs.Sub(staticFS, "web/static")
+	staticSubFS, err := fs.Sub(webfs.StaticFS, "static")
 	if err != nil {
 		slog.Error("failed to create static sub fs", "error", err)
 		os.Exit(1)
@@ -281,17 +309,17 @@ func main() {
 				return
 
 			case <-sessionTicker.C:
-				n, err := store.CleanExpiredSessions(cleanupCtx)
-				if err != nil {
-					slog.Error("cleanup: failed to clean expired sessions", "error", err)
+				n, cleanErr := store.CleanExpiredSessions(cleanupCtx)
+				if cleanErr != nil {
+					slog.Error("cleanup: failed to clean expired sessions", "error", cleanErr)
 				} else if n > 0 {
 					slog.Info("cleanup: removed expired sessions", "count", n)
 				}
 
 			case <-draftTicker.C:
-				drafts, err := store.ListExpiredUploadDrafts(cleanupCtx)
-				if err != nil {
-					slog.Error("cleanup: failed to list expired upload drafts", "error", err)
+				drafts, listErr := store.ListExpiredUploadDrafts(cleanupCtx)
+				if listErr != nil {
+					slog.Error("cleanup: failed to list expired upload drafts", "error", listErr)
 					continue
 				}
 				for _, d := range drafts {
@@ -330,8 +358,8 @@ func main() {
 	serverErr := make(chan error, 1)
 	go func() {
 		slog.Info("server starting", "addr", cfg.Server.Listen)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			serverErr <- err
+		if listenErr := srv.ListenAndServe(); listenErr != nil && listenErr != http.ErrServerClosed {
+			serverErr <- listenErr
 		}
 		close(serverErr)
 	}()
@@ -343,9 +371,9 @@ func main() {
 	select {
 	case sig := <-quit:
 		slog.Info("shutdown signal received", "signal", sig)
-	case err := <-serverErr:
-		if err != nil {
-			slog.Error("server error", "error", err)
+	case srvErr := <-serverErr:
+		if srvErr != nil {
+			slog.Error("server error", "error", srvErr)
 			os.Exit(1)
 		}
 	}
@@ -358,8 +386,8 @@ func main() {
 	defer shutdownCancel()
 
 	slog.Info("shutting down server gracefully")
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		slog.Error("server shutdown error", "error", err)
+	if shutErr := srv.Shutdown(shutdownCtx); shutErr != nil {
+		slog.Error("server shutdown error", "error", shutErr)
 		os.Exit(1)
 	}
 

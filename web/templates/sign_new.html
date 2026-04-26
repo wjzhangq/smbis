@@ -70,7 +70,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const div = document.createElement('div');
             div.className = 'file-item';
             div.innerHTML =
-                '<span class="file-name">' + escapeHtml(f.name) + '</span>' +
+                '<span class="file-name">' + _escapeHTML(f.name) + '</span>' +
                 '<span class="file-size">' + formatSize(f.size) + '</span>' +
                 '<button type="button" class="btn btn-sm btn-danger remove-btn" data-index="' + i + '">移除</button>';
             fileList.appendChild(div);

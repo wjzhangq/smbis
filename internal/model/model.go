@@ -26,7 +26,7 @@ const (
 type User struct {
 	ID        string    `json:"id"`
 	Username  string    `json:"username"`
-	Password  string    `json:"password"`
+	Password  string    `json:"-"`
 	Disabled  bool      `json:"disabled"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -36,6 +36,7 @@ type User struct {
 type Session struct {
 	ID        string    `json:"id"`
 	UserID    string    `json:"user_id"`
+	Username  string    `json:"username"`
 	IsAdmin   bool      `json:"is_admin"`
 	ExpiresAt time.Time `json:"expires_at"`
 	CreatedAt time.Time `json:"created_at"`

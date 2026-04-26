@@ -1,0 +1,50 @@
+{{define "content"}}
+<h2>用户管理</h2>
+<div class="form-card mb-3">
+    <h3>创建用户</h3>
+    <form id="createUserForm" class="inline-form">
+        <input type="text" id="newUsername" placeholder="用户名 (3-32字符, a-zA-Z0-9_-)" required pattern="[a-zA-Z0-9_-]{3,32}">
+        <input type="password" id="newPassword" placeholder="密码" required>
+        <button type="submit" class="btn btn-primary">创建</button>
+    </form>
+</div>
+<table class="table">
+    <thead><tr><th>用户名</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
+    <tbody>
+    {{range .Data.Users}}
+    <tr>
+        <td>{{.Username}}</td>
+        <td>{{if .Disabled}}<span class="status-badge status-canceled">已停用</span>{{else}}<span class="status-badge status-done">活跃</span>{{end}}</td>
+        <td>{{formatTime .CreatedAt}}</td>
+        <td>
+            <button class="btn btn-sm btn-outline" onclick="resetPassword('{{.ID}}')">重置密码</button>
+            {{if .Disabled}}
+            <button class="btn btn-sm btn-success" onclick="toggleUser('{{.ID}}', false)">启用</button>
+            {{else}}
+            <button class="btn btn-sm btn-danger" onclick="toggleUser('{{.ID}}', true)">停用</button>
+            {{end}}
+        </td>
+    </tr>
+    {{end}}
+    </tbody>
+</table>
+<script>
+document.getElementById('createUserForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    try {
+        await apiCall('POST', '/api/admin/users', { username: document.getElementById('newUsername').value, password: document.getElementById('newPassword').value });
+        showToast('用户已创建', 'success');
+        setTimeout(() => location.reload(), 1000);
+    } catch(e) { showToast(e.message, 'error'); }
+});
+async function resetPassword(id) {
+    const pw = prompt('输入新密码:');
+    if (!pw) return;
+    try { await apiCall('POST', '/api/admin/users/' + id + '/reset-password', { password: pw }); showToast('密码已重置', 'success'); } catch(e) { showToast(e.message, 'error'); }
+}
+async function toggleUser(id, disable) {
+    try { await apiCall('POST', '/api/admin/users/' + id + '/disable', { disabled: disable }); location.reload(); } catch(e) { showToast(e.message, 'error'); }
+}
+</script>
+{{end}}
+{{template "layout" .}}

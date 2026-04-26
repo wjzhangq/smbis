@@ -1,0 +1,72 @@
+{{define "content"}}
+<div class="page-header">
+    <h2>管理上线申请: {{.Data.Request.Name}}</h2>
+    <span class="status-badge status-{{.Data.Request.Status}}">{{.Data.Request.Status}}</span>
+</div>
+<div class="info-grid">
+    <div class="info-item"><span class="info-label">申请 ID</span><span class="mono">{{.Data.Request.ID}}</span></div>
+    <div class="info-item"><span class="info-label">期望 URL</span><a href="{{.Data.Request.ExpectedURL}}" target="_blank">{{.Data.Request.ExpectedURL}}</a></div>
+    <div class="info-item"><span class="info-label">申请人</span>{{.Data.Request.UserID}}</div>
+    <div class="info-item"><span class="info-label">创建时间</span>{{formatTime .Data.Request.CreatedAt}}</div>
+</div>
+
+<section class="mt-3">
+    <h3>上线文件</h3>
+    <table class="table">
+        <thead><tr><th>文件名</th><th>大小</th></tr></thead>
+        <tbody>
+        {{range .Data.Files}}<tr><td>{{.OriginalName}}</td><td>{{formatSize .SizeBytes}}</td></tr>{{end}}
+        </tbody>
+    </table>
+</section>
+
+{{if eq .Data.Request.Status "pending"}}
+<section class="mt-3">
+    <button class="btn btn-success" id="doneBtn" onclick="markDone()">标记上线完成</button>
+</section>
+{{end}}
+
+<section class="mt-3">
+    <div class="flex flex-between">
+        <h3>验证记录</h3>
+        <button class="btn btn-primary btn-sm" onclick="doVerify()">验证 URL</button>
+    </div>
+    <div id="verifyResult" class="mt-1"></div>
+    {{if .Data.Verifications}}
+    <table class="table mt-2">
+        <thead><tr><th>时间</th><th>结果</th><th>HTTP 状态码</th><th>延迟</th><th>错误</th></tr></thead>
+        <tbody>
+        {{range .Data.Verifications}}
+        <tr>
+            <td>{{formatTime .VerifiedAt}}</td>
+            <td>{{if .Reachable}}<span class="status-badge status-done">可达</span>{{else}}<span class="status-badge status-canceled">不可达</span>{{end}}</td>
+            <td>{{if .HTTPStatus}}{{deref .HTTPStatus}}{{else}}-{{end}}</td>
+            <td>{{if .LatencyMs}}{{deref .LatencyMs}}ms{{else}}-{{end}}</td>
+            <td>{{if .Error}}{{deref .Error}}{{else}}-{{end}}</td>
+        </tr>
+        {{end}}
+        </tbody>
+    </table>
+    {{end}}
+</section>
+<script>
+async function markDone() {
+    if (!confirm('确认标记为上线完成?')) return;
+    try {
+        await apiCall('POST', '/api/admin/release/requests/{{.Data.Request.ID}}/done');
+        showToast('已标记完成', 'success');
+        setTimeout(() => location.reload(), 1000);
+    } catch(e) { showToast(e.message, 'error'); }
+}
+async function doVerify() {
+    try {
+        const res = await apiCall('POST', '/api/release/requests/{{.Data.Request.ID}}/verify');
+        const d = document.getElementById('verifyResult');
+        if (res.reachable) d.innerHTML = '<div class="alert alert-success">URL 可达! HTTP ' + (res.http_status||'') + ', 延迟 ' + (res.latency_ms||0) + 'ms</div>';
+        else d.innerHTML = '<div class="alert alert-error">不可达: ' + (res.error||'') + '</div>';
+        setTimeout(() => location.reload(), 2000);
+    } catch(e) { showToast(e.message, 'error'); }
+}
+</script>
+{{end}}
+{{template "layout" .}}

@@ -12,7 +12,6 @@ import (
 
 	"github.com/wj/smbis/internal/auth"
 	"github.com/wj/smbis/internal/model"
-	"github.com/wj/smbis/internal/store/oss"
 	ossstore "github.com/wj/smbis/internal/store/oss"
 )
 
@@ -30,6 +29,7 @@ type Store interface {
 	CreateUploadDraft(ctx context.Context, d *model.UploadDraft) error
 	GetUploadDraft(ctx context.Context, id string) (*model.UploadDraft, error)
 	UpdateUploadDraftParts(ctx context.Context, id, partsJSON string) error
+	AppendUploadDraftPart(ctx context.Context, id string, partNumber int, etag string) error
 	DeleteUploadDraft(ctx context.Context, id string) error
 }
 
@@ -174,20 +174,9 @@ func (s *Service) UploadPart(ctx context.Context, draftID string, partNumber int
 		return "", fmt.Errorf("release: upload part %d: %w", partNumber, err)
 	}
 
-	// Deserialise existing parts, append the new one, and persist.
-	var parts []oss.UploadPart
-	if err := json.Unmarshal([]byte(draft.UploadedParts), &parts); err != nil {
-		return "", fmt.Errorf("release: parse uploaded parts: %w", err)
-	}
-	parts = append(parts, oss.UploadPart{PartNumber: partNumber, ETag: etag})
-
-	partsJSON, err := json.Marshal(parts)
-	if err != nil {
-		return "", fmt.Errorf("release: marshal uploaded parts: %w", err)
-	}
-
-	if err := s.store.UpdateUploadDraftParts(ctx, draftID, string(partsJSON)); err != nil {
-		return "", fmt.Errorf("release: update upload draft parts: %w", err)
+	// Atomically append the part to the draft's parts list.
+	if err := s.store.AppendUploadDraftPart(ctx, draftID, partNumber, etag); err != nil {
+		return "", fmt.Errorf("release: append upload draft part: %w", err)
 	}
 
 	return etag, nil

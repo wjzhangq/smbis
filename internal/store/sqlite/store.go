@@ -234,10 +234,11 @@ func scanUserRows(rows *sql.Rows) (*model.User, error) {
 // CreateSession inserts a new session record.
 func (s *Store) CreateSession(ctx context.Context, sess *model.Session) error {
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO sessions (id, user_id, is_admin, expires_at, created_at)
-		 VALUES (?, ?, ?, ?, ?)`,
+		`INSERT INTO sessions (id, user_id, username, is_admin, expires_at, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
 		sess.ID,
 		sess.UserID,
+		sess.Username,
 		boolToInt(sess.IsAdmin),
 		formatTime(sess.ExpiresAt),
 		formatTime(sess.CreatedAt),
@@ -252,13 +253,13 @@ func (s *Store) CreateSession(ctx context.Context, sess *model.Session) error {
 func (s *Store) GetSession(ctx context.Context, id string) (*model.Session, error) {
 	now := formatTime(time.Now().UTC())
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, user_id, is_admin, expires_at, created_at
+		`SELECT id, user_id, username, is_admin, expires_at, created_at
 		 FROM sessions WHERE id = ? AND expires_at > ?`, id, now)
 
 	var sess model.Session
 	var isAdminInt int
 	var expiresAt, createdAt string
-	err := row.Scan(&sess.ID, &sess.UserID, &isAdminInt, &expiresAt, &createdAt)
+	err := row.Scan(&sess.ID, &sess.UserID, &sess.Username, &isAdminInt, &expiresAt, &createdAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -914,6 +915,43 @@ func (s *Store) UpdateUploadDraftParts(ctx context.Context, id, partsJSON string
 		return fmt.Errorf("UpdateUploadDraftParts: %w", err)
 	}
 	return nil
+}
+
+// AppendUploadDraftPart atomically reads the current parts, appends the new
+// part, and writes the result back — all within a single transaction. This
+// prevents TOCTOU issues if MaxOpenConns is ever increased above 1.
+func (s *Store) AppendUploadDraftPart(ctx context.Context, id string, partNumber int, etag string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("AppendUploadDraftPart begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	var partsStr string
+	if err := tx.QueryRowContext(ctx,
+		`SELECT uploaded_parts FROM upload_drafts WHERE id = ?`, id,
+	).Scan(&partsStr); err != nil {
+		return fmt.Errorf("AppendUploadDraftPart select: %w", err)
+	}
+
+	// Append new part entry as raw JSON to avoid import cycles.
+	newEntry := fmt.Sprintf(`{"PartNumber":%d,"ETag":%q}`, partNumber, etag)
+	if partsStr == "" || partsStr == "[]" {
+		partsStr = "[" + newEntry + "]"
+	} else {
+		// Insert before the closing ']'.
+		partsStr = partsStr[:len(partsStr)-1] + "," + newEntry + "]"
+	}
+
+	_, err = tx.ExecContext(ctx,
+		`UPDATE upload_drafts SET uploaded_parts = ?, updated_at = ? WHERE id = ?`,
+		partsStr, formatTime(time.Now().UTC()), id,
+	)
+	if err != nil {
+		return fmt.Errorf("AppendUploadDraftPart update: %w", err)
+	}
+
+	return tx.Commit()
 }
 
 // DeleteUploadDraft removes an upload draft by ID.

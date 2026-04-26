@@ -1,0 +1,43 @@
+{{define "content"}}
+<h2>所有申请</h2>
+
+<section class="mt-3">
+    <h3>签名申请</h3>
+    <table class="table">
+        <thead><tr><th>ID</th><th>名称</th><th>申请人</th><th>状态</th><th>时间</th><th>操作</th></tr></thead>
+        <tbody>
+        {{range .Data.SignRequests}}
+        <tr>
+            <td class="mono">{{.ID}}</td>
+            <td>{{.Name}}</td>
+            <td>{{.UserID}}</td>
+            <td><span class="status-badge status-{{.Status}}">{{.Status}}</span></td>
+            <td>{{timeAgo .UpdatedAt}}</td>
+            <td><a href="/admin/sign/{{.ID}}" class="btn btn-sm btn-outline">管理</a></td>
+        </tr>
+        {{end}}
+        </tbody>
+    </table>
+</section>
+
+<section class="mt-3">
+    <h3>上线申请</h3>
+    <table class="table">
+        <thead><tr><th>ID</th><th>名称</th><th>申请人</th><th>期望 URL</th><th>状态</th><th>时间</th><th>操作</th></tr></thead>
+        <tbody>
+        {{range .Data.ReleaseRequests}}
+        <tr>
+            <td class="mono">{{.ID}}</td>
+            <td>{{.Name}}</td>
+            <td>{{.UserID}}</td>
+            <td class="url-cell"><a href="{{.ExpectedURL}}" target="_blank">{{.ExpectedURL}}</a></td>
+            <td><span class="status-badge status-{{.Status}}">{{.Status}}</span></td>
+            <td>{{timeAgo .UpdatedAt}}</td>
+            <td><a href="/admin/release/{{.ID}}" class="btn btn-sm btn-outline">管理</a></td>
+        </tr>
+        {{end}}
+        </tbody>
+    </table>
+</section>
+{{end}}
+{{template "layout" .}}

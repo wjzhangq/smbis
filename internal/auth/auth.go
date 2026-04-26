@@ -86,6 +86,9 @@ func Login(ctx context.Context, store UserStore, adminCfg AdminConfig, username,
 	if err != nil {
 		return nil, ErrInvalidCredentials
 	}
+	if user == nil {
+		return nil, ErrInvalidCredentials
+	}
 
 	if user.Disabled {
 		return nil, ErrUserDisabled
@@ -113,6 +116,7 @@ func CreateSessionForIdentity(ctx context.Context, store SessionStore, identity 
 	s := &model.Session{
 		ID:        sessionID,
 		UserID:    identity.UserID,
+		Username:  identity.Username,
 		IsAdmin:   identity.IsAdmin,
 		ExpiresAt: now.Add(ttl),
 		CreatedAt: now,

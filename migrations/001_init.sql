@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS sessions (
   id          TEXT PRIMARY KEY,
   user_id     TEXT NOT NULL,
+  username    TEXT NOT NULL DEFAULT '',
   is_admin    INTEGER NOT NULL DEFAULT 0,
   expires_at  DATETIME NOT NULL,
   created_at  DATETIME NOT NULL

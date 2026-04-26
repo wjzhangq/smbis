@@ -2,6 +2,7 @@
 package web
 
 import (
+	"bytes"
 	"html/template"
 	"log/slog"
 	"net/http"
@@ -60,13 +61,19 @@ func New(
 // ---------------------------------------------------------------------------
 
 // render executes the named template with the provided data and status code.
-// On execution error it falls back to a plain 500 response.
+// The template is first rendered to a buffer so that an execution error does
+// not produce a partially-written response with incorrect headers.
 func (h *Handler) render(w http.ResponseWriter, name string, status int, data any) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(status)
-	if err := h.templates.ExecuteTemplate(w, name, data); err != nil {
+	var buf bytes.Buffer
+	if err := h.templates.ExecuteTemplate(&buf, name, data); err != nil {
 		slog.Error("template execution failed", "template", name, "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	if _, err := buf.WriteTo(w); err != nil {
+		slog.Error("template write failed", "template", name, "error", err)
 	}
 }
 

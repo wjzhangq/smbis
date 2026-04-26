@@ -142,7 +142,7 @@ func RequireAuth(sg SessionGetter) func(http.Handler) http.Handler {
 			identity := &model.Identity{
 				IsAdmin:  session.IsAdmin,
 				UserID:   session.UserID,
-				Username: session.UserID, // Username resolved from UserID; callers may enrich if needed.
+				Username: session.Username,
 			}
 
 			ctx := SetIdentity(r.Context(), identity)

@@ -6,7 +6,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/wj/smbis/internal/middleware"
@@ -32,6 +34,20 @@ func New(signSvc *sign.Service, externalURL string) *Handler {
 // ---------------------------------------------------------------------------
 // JSON helpers
 // ---------------------------------------------------------------------------
+
+// sanitizeFilename strips path components and replaces characters that are
+// problematic in Content-Disposition headers.
+func sanitizeFilename(name string) string {
+	name = filepath.Base(name)
+	name = strings.ReplaceAll(name, `"`, "_")
+	name = strings.ReplaceAll(name, `\`, "_")
+	name = strings.ReplaceAll(name, "\n", "_")
+	name = strings.ReplaceAll(name, "\r", "_")
+	if name == "" || name == "." {
+		name = "download"
+	}
+	return name
+}
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -117,10 +133,30 @@ func (h *Handler) ListFiles(w http.ResponseWriter, r *http.Request) {
 }
 
 // DownloadFile handles GET /cli/sign/{requestId}/files/{fileId}/download.
-// No auth required. Streams the file directly from OSS, setting appropriate
-// Content-Disposition, Content-Type, and Content-Length headers.
+// No auth required. Validates that the file belongs to the request, then
+// streams the file directly from OSS, setting appropriate Content-Disposition,
+// Content-Type, and Content-Length headers.
 func (h *Handler) DownloadFile(w http.ResponseWriter, r *http.Request) {
+	requestID := chi.URLParam(r, "requestId")
 	fileID := chi.URLParam(r, "fileId")
+
+	// Verify the file belongs to this request.
+	_, files, err := h.signSvc.GetRequestWithFiles(r.Context(), requestID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "request not found")
+		return
+	}
+	found := false
+	for _, f := range files {
+		if f.ID == fileID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, "file not found in this request")
+		return
+	}
 
 	rc, name, size, err := h.signSvc.GetFileReader(r.Context(), fileID)
 	if err != nil {
@@ -129,7 +165,8 @@ func (h *Handler) DownloadFile(w http.ResponseWriter, r *http.Request) {
 	}
 	defer rc.Close()
 
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, name))
+	safeName := sanitizeFilename(name)
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, safeName))
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 	w.WriteHeader(http.StatusOK)

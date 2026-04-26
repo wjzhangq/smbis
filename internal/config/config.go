@@ -18,7 +18,7 @@ func (b *ByteSize) UnmarshalYAML(value *yaml.Node) error {
 		// Try decoding as a raw integer.
 		var n int64
 		if err2 := value.Decode(&n); err2 != nil {
-			return fmt.Errorf("bytesize: cannot decode value: %w", err)
+			return fmt.Errorf("bytesize: cannot decode value: %w", err2)
 		}
 		*b = ByteSize(n)
 		return nil
