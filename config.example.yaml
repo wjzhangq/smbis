@@ -1,0 +1,26 @@
+server:
+  listen: ":8080"
+  external_url: "https://smb.example.com"
+  session_ttl: "12h"
+  upload_chunk_size: "8MiB"
+  max_file_size: "2GiB"
+
+admin:
+  username: "admin"
+  password: "test1afaf"
+
+storage:
+  sqlite_path: "./data/db.sqlite"
+
+oss:
+  endpoint: "oss-cn-hangzhou.aliyuncs.com"
+  internal_endpoint: "oss-cn-hangzhou-internal.aliyuncs.com"
+  access_key_id: "LTAI..."
+  access_key_secret: "..."
+  bucket: "smb-prod"
+  prefix: "smb/prod"
+  presign_ttl: "10m"
+
+verify:
+  http_timeout: "5s"
+  follow_redirects: 5
