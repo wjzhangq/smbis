@@ -30,9 +30,22 @@ import (
 	webfs "github.com/wj/smbis/web"
 )
 
+// Build-time variables injected via ldflags.
+var (
+	Version   = "dev"
+	Commit    = "unknown"
+	BuildTime = "unknown"
+)
+
 func main() {
 	cfgPath := flag.String("config", "config.yaml", "path to configuration file")
+	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("smbis %s (commit: %s, built: %s)\n", Version, Commit, BuildTime)
+		os.Exit(0)
+	}
 
 	// Load configuration.
 	cfg, err := config.Load(*cfgPath)
@@ -357,7 +370,7 @@ func main() {
 	// Start server in a goroutine so we can listen for shutdown signals.
 	serverErr := make(chan error, 1)
 	go func() {
-		slog.Info("server starting", "addr", cfg.Server.Listen)
+		slog.Info("server starting", "addr", cfg.Server.Listen, "version", Version, "commit", Commit)
 		if listenErr := srv.ListenAndServe(); listenErr != nil && listenErr != http.ErrServerClosed {
 			serverErr <- listenErr
 		}
