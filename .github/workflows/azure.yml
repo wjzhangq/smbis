@@ -1,0 +1,128 @@
+name: Build and Deploy on Tag
+
+on:
+  push:
+    tags:
+      - 'v*'           # v1.0.0, v1.2.3-rc1 等都触发
+  workflow_dispatch:   # 也支持 GitHub UI 手动触发
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+    name: Build Go binary and deploy to Azure server
+    env:
+      TARGET_DIR: /home/azureuser/src/smbis
+      BINARY_NAME: smbis
+      SERVICE_NAME: smbis.service
+      SSH_USER: ${{ secrets.REMOTE_USER }}
+      SSH_HOST: ${{ secrets.REMOTE_HOST }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # 拿完整 git 历史，便于 ldflags 注入版本
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: Resolve version
+        id: version
+        run: |
+          set -e
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          else
+            VERSION="manual-$(git rev-parse --short HEAD)"
+          fi
+          COMMIT=$(git rev-parse --short HEAD)
+          BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "commit=${COMMIT}"   >> $GITHUB_OUTPUT
+          echo "build_time=${BUILD_TIME}" >> $GITHUB_OUTPUT
+          echo "Building ${VERSION} (${COMMIT}) at ${BUILD_TIME}"
+
+      - name: Build binary (linux/amd64, static)
+        env:
+          CGO_ENABLED: 0    # modernc.org/sqlite 是纯 Go，可静态编译
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          set -e
+          mkdir -p dist
+          go build -trimpath \
+            -ldflags="-s -w \
+              -X 'main.Version=${{ steps.version.outputs.version }}' \
+              -X 'main.Commit=${{ steps.version.outputs.commit }}' \
+              -X 'main.BuildTime=${{ steps.version.outputs.build_time }}'" \
+            -o dist/${BINARY_NAME} \
+            ./cmd/smbis
+          ls -lh dist/
+          file dist/${BINARY_NAME}
+
+      - name: Setup SSH
+        run: |
+          set -e
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H $SSH_HOST >> ~/.ssh/known_hosts
+
+      - name: Upload binary to server
+        run: |
+          set -e
+          # 确保目标目录存在
+          ssh $SSH_USER@$SSH_HOST "mkdir -p ${TARGET_DIR}"
+          # 先传到 .new 临时文件，避免传输中途被使用
+          scp dist/${BINARY_NAME} \
+            $SSH_USER@$SSH_HOST:${TARGET_DIR}/${BINARY_NAME}.new
+
+      - name: Swap binary and restart service
+        run: |
+          set -e
+          ssh $SSH_USER@$SSH_HOST bash -s << EOF
+            set -e
+            cd ${TARGET_DIR}
+
+            echo "📦 New binary uploaded, version: ${{ steps.version.outputs.version }}"
+            chmod +x ${BINARY_NAME}.new
+
+            # 备份当前版本，便于回滚
+            if [ -f ${BINARY_NAME} ]; then
+              cp ${BINARY_NAME} ${BINARY_NAME}.prev
+              echo "💾 Previous binary backed up as ${BINARY_NAME}.prev"
+            fi
+
+            # 原子替换
+            mv ${BINARY_NAME}.new ${BINARY_NAME}
+            echo "🔄 Binary swapped"
+
+            # 验证新二进制能跑（打印版本）
+            ./${BINARY_NAME} -version || echo "(version flag not implemented, skip)"
+
+            # 重启服务
+            echo "🔁 Restarting ${SERVICE_NAME}"
+            sudo systemctl restart ${SERVICE_NAME}
+
+            # 等几秒确认确实起来了
+            sleep 3
+            if sudo systemctl is-active --quiet ${SERVICE_NAME}; then
+              echo "✅ Deployment finished, service is active"
+              sudo systemctl status ${SERVICE_NAME} --no-pager -l | head -20
+            else
+              echo "❌ Service failed to start, rolling back"
+              if [ -f ${BINARY_NAME}.prev ]; then
+                mv ${BINARY_NAME}.prev ${BINARY_NAME}
+                sudo systemctl restart ${SERVICE_NAME}
+                echo "↩️  Rolled back to previous binary"
+              fi
+              exit 1
+            fi
+          EOF
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f ~/.ssh/id_rsa
