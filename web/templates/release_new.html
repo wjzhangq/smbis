@@ -1,0 +1,121 @@
+{{define "content"}}
+<h2>新建上线申请</h2>
+<form id="releaseForm" class="form-card">
+    <div class="form-group">
+        <label for="name">申请名称</label>
+        <input type="text" id="name" required maxlength="100" placeholder="例如: 官网更新 v2.1">
+    </div>
+    <div class="form-group">
+        <label>期望上线 URL</label>
+        <div class="url-input-group">
+            <select id="urlDomain">
+                <option value="https://smbis-downloads.lenovo.com">https://smbis-downloads.lenovo.com</option>
+            </select>
+            <input type="text" id="urlPath" placeholder="/path/to/file" required>
+        </div>
+        <small class="text-secondary">完整 URL 预览: <span id="urlPreview"></span></small>
+    </div>
+    <div class="form-group">
+        <label>上传文件</label>
+        <div class="upload-zone" id="uploadZone">
+            <p>拖拽文件到此处或点击选择</p>
+            <p class="text-secondary">不限文件类型（单文件最大 2 GiB）</p>
+            <input type="file" id="fileInput" multiple style="display:none">
+        </div>
+        <div id="fileList" class="file-list"></div>
+    </div>
+    <div id="uploadProgress" style="display:none">
+        <div class="progress-bar"><div class="progress-bar-fill" id="progressFill"></div></div>
+        <div class="progress-info">
+            <span id="progressText">0%</span>
+            <span id="progressSpeed"></span>
+            <span id="progressETA"></span>
+        </div>
+    </div>
+    <button type="submit" class="btn btn-primary" id="submitBtn">创建申请</button>
+</form>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const zone = document.getElementById('uploadZone');
+    const fileInput = document.getElementById('fileInput');
+    const fileList = document.getElementById('fileList');
+    const form = document.getElementById('releaseForm');
+    const urlDomain = document.getElementById('urlDomain');
+    const urlPath = document.getElementById('urlPath');
+    const urlPreview = document.getElementById('urlPreview');
+    let selectedFiles = [];
+
+    function updatePreview() { urlPreview.textContent = urlDomain.value + urlPath.value; }
+    urlDomain.addEventListener('change', updatePreview);
+    urlPath.addEventListener('input', updatePreview);
+    updatePreview();
+
+    zone.addEventListener('click', () => fileInput.click());
+    zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('drag-over'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+    zone.addEventListener('drop', (e) => { e.preventDefault(); zone.classList.remove('drag-over'); addFiles(e.dataTransfer.files); });
+    fileInput.addEventListener('change', () => addFiles(fileInput.files));
+
+    function addFiles(files) {
+        for (const f of files) {
+            if (!selectedFiles.find(sf => sf.name === f.name)) selectedFiles.push(f);
+        }
+        renderFileList();
+    }
+    function renderFileList() {
+        fileList.innerHTML = '';
+        selectedFiles.forEach((f, i) => {
+            const div = document.createElement('div');
+            div.className = 'file-item';
+            div.innerHTML = '<span class="file-name">' + f.name + '</span><span class="file-size">' + formatSize(f.size) + '</span><button type="button" class="btn btn-sm btn-danger remove-btn" data-index="' + i + '">移除</button>';
+            fileList.appendChild(div);
+        });
+        fileList.querySelectorAll('.remove-btn').forEach(btn => {
+            btn.addEventListener('click', function() { selectedFiles.splice(parseInt(this.dataset.index), 1); renderFileList(); });
+        });
+    }
+
+    form.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const name = document.getElementById('name').value.trim();
+        const expectedURL = urlDomain.value + urlPath.value.trim();
+        if (!name) { showToast('请输入申请名称', 'error'); return; }
+        if (!urlPath.value.trim()) { showToast('请输入 URL 路径', 'error'); return; }
+        if (selectedFiles.length === 0) { showToast('请至少选择一个文件', 'error'); return; }
+
+        document.getElementById('submitBtn').disabled = true;
+        document.getElementById('uploadProgress').style.display = 'block';
+        try {
+            const res = await apiCall('POST', '/api/release/requests', { name, expected_url: expectedURL });
+            const requestId = res.id;
+            let totalSize = selectedFiles.reduce((s, f) => s + f.size, 0), totalUploaded = 0;
+            for (const file of selectedFiles) {
+                const initRes = await apiCall('POST', '/api/release/requests/' + requestId + '/files/init', { file_name: file.name, file_size: file.size });
+                const uploader = new ChunkedUploader(file, {
+                    draftId: initRes.draft_id, chunkSize: initRes.chunk_size,
+                    partURL: '/api/release/requests/' + requestId + '/files/' + initRes.draft_id + '/part',
+                    completeURL: '/api/release/requests/' + requestId + '/files/' + initRes.draft_id + '/complete',
+                });
+                await new Promise((resolve, reject) => {
+                    uploader.onProgress((p) => {
+                        const overall = ((totalUploaded + p.uploaded) / totalSize * 100).toFixed(1);
+                        document.getElementById('progressFill').style.width = overall + '%';
+                        document.getElementById('progressText').textContent = overall + '%';
+                        if (p.speed) document.getElementById('progressSpeed').textContent = formatSize(p.speed) + '/s';
+                        if (p.eta) document.getElementById('progressETA').textContent = '剩余 ' + formatDuration(p.eta);
+                    });
+                    uploader.onComplete(() => { totalUploaded += file.size; resolve(); });
+                    uploader.onError(reject);
+                    uploader.start();
+                });
+            }
+            window.location.href = '/release/' + requestId;
+        } catch (err) {
+            showToast('创建失败: ' + err.message, 'error');
+            document.getElementById('submitBtn').disabled = false;
+        }
+    });
+});
+</script>
+{{end}}
+{{template "layout" .}}

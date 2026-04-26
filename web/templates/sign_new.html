@@ -1,0 +1,158 @@
+{{define "content"}}
+<h2>新建签名申请</h2>
+<form id="signForm" class="form-card">
+    <div class="form-group">
+        <label for="name">申请名称</label>
+        <input type="text" id="name" name="name" required maxlength="100" placeholder="例如: OpenClaw v1.2.0 release">
+    </div>
+
+    <div class="form-group">
+        <label>选择文件</label>
+        <div class="upload-zone" id="uploadZone">
+            <p>拖拽文件到此处或点击选择</p>
+            <p class="text-secondary">支持 .exe, .dll, .sys, .ocx, .msi, .xml（单文件最大 2 GiB）</p>
+            <input type="file" id="fileInput" multiple accept=".exe,.dll,.sys,.ocx,.msi,.xml" style="display:none">
+        </div>
+        <div id="fileList" class="file-list"></div>
+    </div>
+
+    <div id="uploadProgress" style="display:none">
+        <div class="progress-bar">
+            <div class="progress-bar-fill" id="progressFill"></div>
+        </div>
+        <div class="progress-info">
+            <span id="progressText">0%</span>
+            <span id="progressSpeed"></span>
+            <span id="progressETA"></span>
+        </div>
+        <div id="fileProgressList"></div>
+    </div>
+
+    <button type="submit" class="btn btn-primary" id="submitBtn">创建申请</button>
+</form>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const zone = document.getElementById('uploadZone');
+    const fileInput = document.getElementById('fileInput');
+    const fileList = document.getElementById('fileList');
+    const form = document.getElementById('signForm');
+    const allowedExts = ['.exe', '.dll', '.sys', '.ocx', '.msi', '.xml'];
+    let selectedFiles = [];
+
+    zone.addEventListener('click', () => fileInput.click());
+    zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('drag-over'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+    zone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        zone.classList.remove('drag-over');
+        addFiles(e.dataTransfer.files);
+    });
+    fileInput.addEventListener('change', () => { addFiles(fileInput.files); fileInput.value = ''; });
+
+    function addFiles(files) {
+        for (const f of files) {
+            const ext = '.' + f.name.split('.').pop().toLowerCase();
+            if (!allowedExts.includes(ext)) {
+                showToast(f.name + ' 不支持的文件类型', 'error');
+                continue;
+            }
+            if (!selectedFiles.find(sf => sf.name === f.name)) {
+                selectedFiles.push(f);
+            }
+        }
+        renderFileList();
+    }
+
+    function renderFileList() {
+        fileList.innerHTML = '';
+        selectedFiles.forEach((f, i) => {
+            const div = document.createElement('div');
+            div.className = 'file-item';
+            div.innerHTML =
+                '<span class="file-name">' + escapeHtml(f.name) + '</span>' +
+                '<span class="file-size">' + formatSize(f.size) + '</span>' +
+                '<button type="button" class="btn btn-sm btn-danger remove-btn" data-index="' + i + '">移除</button>';
+            fileList.appendChild(div);
+        });
+        fileList.querySelectorAll('.remove-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                selectedFiles.splice(parseInt(this.dataset.index), 1);
+                renderFileList();
+            });
+        });
+    }
+
+    form.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        const name = document.getElementById('name').value.trim();
+        if (!name) { showToast('请输入申请名称', 'error'); return; }
+        if (selectedFiles.length === 0) { showToast('请至少选择一个文件', 'error'); return; }
+
+        document.getElementById('submitBtn').disabled = true;
+        document.getElementById('uploadProgress').style.display = 'block';
+
+        try {
+            // Step 1: Create sign request, get request_id.
+            const res = await apiCall('POST', '/api/sign/requests', { name: name });
+            const requestId = res.request_id;
+
+            // Step 2: Upload each file via chunked multipart upload.
+            const totalSize = selectedFiles.reduce((s, f) => s + f.size, 0);
+            let totalUploaded = 0;
+
+            for (let i = 0; i < selectedFiles.length; i++) {
+                const file = selectedFiles[i];
+
+                // Initialise the upload draft on the server.
+                const initRes = await apiCall('POST', '/api/sign/requests/' + requestId + '/files/init', {
+                    file_name: file.name,
+                    file_size: file.size,
+                });
+
+                const uploader = new ChunkedUploader(file, {
+                    draftId: initRes.draft_id,
+                    chunkSize: initRes.chunk_size,
+                    partURL: '/api/sign/requests/' + requestId + '/files/' + initRes.draft_id + '/part',
+                    completeURL: '/api/sign/requests/' + requestId + '/files/' + initRes.draft_id + '/complete',
+                });
+
+                await new Promise((resolve, reject) => {
+                    uploader.onProgress((p) => {
+                        const overall = totalSize > 0
+                            ? ((totalUploaded + p.uploaded) / totalSize * 100).toFixed(1)
+                            : '0';
+                        document.getElementById('progressFill').style.width = overall + '%';
+                        document.getElementById('progressText').textContent = overall + '%';
+                        if (p.speed) {
+                            document.getElementById('progressSpeed').textContent = formatSize(p.speed) + '/s';
+                        }
+                        if (p.eta) {
+                            document.getElementById('progressETA').textContent = '剩余 ' + formatDuration(p.eta);
+                        }
+                    });
+                    uploader.onComplete(() => { totalUploaded += file.size; resolve(); });
+                    uploader.onError((err) => reject(err));
+                    uploader.start();
+                });
+            }
+
+            // Step 3: All uploads done — navigate to the request detail page.
+            window.location.href = '/sign/' + requestId;
+        } catch (err) {
+            showToast('上传失败: ' + (err.message || err), 'error');
+            document.getElementById('submitBtn').disabled = false;
+        }
+    });
+
+    // Warn the user if they try to navigate away during an active upload.
+    window.addEventListener('beforeunload', function(e) {
+        if (document.getElementById('submitBtn').disabled) {
+            e.preventDefault();
+            e.returnValue = '';
+        }
+    });
+});
+</script>
+{{end}}
+{{template "layout" .}}

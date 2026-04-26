@@ -1,0 +1,86 @@
+{{define "content"}}
+<div class="page-header">
+    <h2>上线申请: {{.Data.Request.Name}}</h2>
+    <span class="status-badge status-{{.Data.Request.Status}}">{{.Data.Request.Status}}</span>
+</div>
+<div class="info-grid">
+    <div class="info-item"><span class="info-label">申请 ID</span><span class="mono">{{.Data.Request.ID}}</span></div>
+    <div class="info-item"><span class="info-label">期望 URL</span><a href="{{.Data.Request.ExpectedURL}}" target="_blank">{{.Data.Request.ExpectedURL}}</a></div>
+    <div class="info-item"><span class="info-label">状态</span><span class="status-badge status-{{.Data.Request.Status}}">{{.Data.Request.Status}}</span></div>
+    <div class="info-item"><span class="info-label">创建时间</span>{{formatTime .Data.Request.CreatedAt}}</div>
+    {{if .Data.Request.DoneAt}}<div class="info-item"><span class="info-label">完成时间</span>{{formatTime (deref .Data.Request.DoneAt)}}</div>{{end}}
+</div>
+
+<section class="mt-3">
+    <h3>上线文件</h3>
+    <table class="table">
+        <thead><tr><th>文件名</th><th>大小</th></tr></thead>
+        <tbody>
+        {{range .Data.Files}}
+        <tr><td>{{.OriginalName}}</td><td>{{formatSize .SizeBytes}}</td></tr>
+        {{end}}
+        </tbody>
+    </table>
+</section>
+
+<section class="mt-3">
+    <h3>邮件通知模板</h3>
+    <div class="email-preview" id="emailPreview">主题: 上线申请 - {{.Data.Request.Name}}
+
+各位好，
+
+请协助处理以下上线申请：
+
+申请名称：{{.Data.Request.Name}}
+期望 URL：{{.Data.Request.ExpectedURL}}
+申请链接：{{.ExternalURL}}/release/{{.Data.Request.ID}}
+
+文件列表：
+{{range $i, $f := .Data.Files}}{{add $i 1}}. {{$f.OriginalName}}   ({{formatSize $f.SizeBytes}})
+{{end}}
+谢谢。</div>
+    <button class="btn btn-sm btn-outline mt-1" onclick="copyToClipboard(document.getElementById('emailPreview').textContent, this)">复制邮件正文</button>
+</section>
+
+<section class="mt-3">
+    <div class="flex flex-between">
+        <h3>验证上线结果</h3>
+        <button class="btn btn-primary btn-sm" id="verifyBtn" onclick="doVerify()">验证 URL</button>
+    </div>
+    <div id="verifyResult" class="mt-1"></div>
+    {{if .Data.Verifications}}
+    <table class="table mt-2">
+        <thead><tr><th>时间</th><th>结果</th><th>HTTP 状态码</th><th>延迟</th><th>错误</th></tr></thead>
+        <tbody>
+        {{range .Data.Verifications}}
+        <tr>
+            <td>{{formatTime .VerifiedAt}}</td>
+            <td>{{if .Reachable}}<span class="status-badge status-done">可达</span>{{else}}<span class="status-badge status-canceled">不可达</span>{{end}}</td>
+            <td>{{if .HTTPStatus}}{{deref .HTTPStatus}}{{else}}-{{end}}</td>
+            <td>{{if .LatencyMs}}{{deref .LatencyMs}}ms{{else}}-{{end}}</td>
+            <td>{{if .Error}}{{deref .Error}}{{else}}-{{end}}</td>
+        </tr>
+        {{end}}
+        </tbody>
+    </table>
+    {{end}}
+</section>
+<script>
+async function doVerify() {
+    const btn = document.getElementById('verifyBtn');
+    const resultDiv = document.getElementById('verifyResult');
+    btn.disabled = true; btn.textContent = '验证中...';
+    try {
+        const res = await apiCall('POST', '/api/release/requests/{{.Data.Request.ID}}/verify');
+        if (res.reachable) {
+            resultDiv.innerHTML = '<div class="alert alert-success">URL 可达! HTTP ' + (res.http_status||'') + ', 延迟 ' + (res.latency_ms||0) + 'ms</div>';
+        } else {
+            resultDiv.innerHTML = '<div class="alert alert-error">URL 不可达: ' + (res.error||'unknown') + '</div>';
+        }
+        setTimeout(() => location.reload(), 2000);
+    } catch(e) { resultDiv.innerHTML = '<div class="alert alert-error">' + e.message + '</div>'; }
+    btn.disabled = false; btn.textContent = '验证 URL';
+}
+</script>
+{{end}}
+{{template "layout" .}}

@@ -1,0 +1,38 @@
+{{define "layout"}}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}} - SMB</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    {{if .Identity}}
+    <nav class="navbar">
+        <div class="container navbar-inner">
+            <a href="/" class="navbar-brand">SMB</a>
+            <div class="navbar-right">
+                <span class="navbar-user">hi, {{.Identity.Username}}</span>
+                {{if .Identity.IsAdmin}}
+                <a href="/admin/all" class="navbar-link">All Requests</a>
+                <a href="/admin/users" class="navbar-link">Users</a>
+                <a href="/admin/cli-keys" class="navbar-link">CLI Keys</a>
+                {{end}}
+                <form method="POST" action="/logout" style="display:inline">
+                    <button type="submit" class="btn btn-sm btn-outline">Logout</button>
+                </form>
+            </div>
+        </div>
+    </nav>
+    {{end}}
+    <main class="container main-content">
+        {{if .Error}}
+        <div class="alert alert-error">{{.Error}}</div>
+        {{end}}
+        {{template "content" .}}
+    </main>
+    <script src="/static/app.js"></script>
+</body>
+</html>
+{{end}}

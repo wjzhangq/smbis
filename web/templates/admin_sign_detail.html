@@ -1,0 +1,85 @@
+{{define "content"}}
+<div class="page-header">
+    <h2>管理签名申请: {{.Data.Request.Name}}</h2>
+    <span class="status-badge status-{{.Data.Request.Status}}">{{.Data.Request.Status}}</span>
+</div>
+<div class="info-grid">
+    <div class="info-item"><span class="info-label">申请 ID</span><span class="mono">{{.Data.Request.ID}}</span></div>
+    <div class="info-item"><span class="info-label">申请人</span>{{.Data.Request.UserID}}</div>
+    <div class="info-item"><span class="info-label">创建时间</span>{{formatTime .Data.Request.CreatedAt}}</div>
+</div>
+
+<section class="mt-3">
+    <h3>文件列表</h3>
+    <table class="table">
+        <thead><tr><th>文件名</th><th>类型</th><th>大小</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody>
+        {{range .Data.Files}}
+        <tr id="file-row-{{.ID}}">
+            <td>{{.OriginalName}}</td>
+            <td>{{.FileType}}</td>
+            <td>{{formatSize .SizeBytes}}</td>
+            <td><span class="status-badge status-{{.Status}}" id="status-{{.ID}}">{{.Status}}</span></td>
+            <td class="actions-cell">
+                {{if eq .Status "pending"}}
+                <a href="{{.DownloadURL}}" class="btn btn-sm btn-primary" target="_blank">下载源文件</a>
+                <button class="btn btn-sm btn-success" onclick="uploadSigned('{{.ID}}')">上传已签</button>
+                <button class="btn btn-sm btn-danger" onclick="markFailed('{{.ID}}')">标记失败</button>
+                <input type="file" id="signed-input-{{.ID}}" style="display:none" onchange="doUploadSigned('{{.ID}}', this.files[0])">
+                <div id="progress-{{.ID}}" class="file-upload-progress" style="display:none">
+                    <div class="progress-bar"><div class="progress-bar-fill" id="pfill-{{.ID}}"></div></div>
+                    <span id="ptext-{{.ID}}">0%</span>
+                </div>
+                {{else if eq .Status "signed"}}
+                {{if .DownloadURL}}<a href="{{.DownloadURL}}" class="btn btn-sm btn-success" target="_blank">下载已签文件</a>{{end}}
+                {{if .SignedSizeBytes}}<span class="text-secondary">{{formatSize (deref .SignedSizeBytes)}}</span>{{end}}
+                {{else}}
+                {{if .FailReason}}<span class="text-secondary">原因: {{deref .FailReason}}</span>{{end}}
+                {{end}}
+            </td>
+        </tr>
+        {{end}}
+        </tbody>
+    </table>
+</section>
+
+<script>
+function uploadSigned(fileId) { document.getElementById('signed-input-' + fileId).click(); }
+
+async function doUploadSigned(fileId, file) {
+    if (!file) return;
+    const progressDiv = document.getElementById('progress-' + fileId);
+    progressDiv.style.display = 'block';
+    try {
+        const initRes = await apiCall('POST', '/api/admin/sign/files/' + fileId + '/signed-upload/init', { file_size: file.size });
+        const uploader = new ChunkedUploader(file, {
+            draftId: initRes.draft_id, chunkSize: initRes.chunk_size,
+            partURL: '/api/admin/sign/files/' + fileId + '/signed-upload/' + initRes.draft_id + '/part',
+            completeURL: '/api/admin/sign/files/' + fileId + '/signed-upload/' + initRes.draft_id + '/complete',
+        });
+        await new Promise((resolve, reject) => {
+            uploader.onProgress((p) => {
+                document.getElementById('pfill-' + fileId).style.width = p.percent + '%';
+                document.getElementById('ptext-' + fileId).textContent = p.percent.toFixed(1) + '%';
+            });
+            uploader.onComplete(resolve);
+            uploader.onError(reject);
+            uploader.start();
+        });
+        showToast('上传成功', 'success');
+        setTimeout(() => location.reload(), 1000);
+    } catch(e) { showToast('上传失败: ' + e.message, 'error'); }
+}
+
+async function markFailed(fileId) {
+    const reason = prompt('请输入失败原因:');
+    if (!reason) return;
+    try {
+        await apiCall('POST', '/api/admin/sign/files/' + fileId + '/fail', { reason });
+        showToast('已标记失败', 'success');
+        setTimeout(() => location.reload(), 1000);
+    } catch(e) { showToast(e.message, 'error'); }
+}
+</script>
+{{end}}
+{{template "layout" .}}

@@ -1,0 +1,107 @@
+{{define "content"}}
+<div class="page-header">
+    <h2>签名申请: {{.Data.Request.Name}}</h2>
+    <span class="status-badge status-{{.Data.Request.Status}}">{{.Data.Request.Status}}</span>
+</div>
+
+<div class="info-grid">
+    <div class="info-item">
+        <span class="info-label">申请 ID</span>
+        <span class="mono">{{.Data.Request.ID}}</span>
+    </div>
+    <div class="info-item">
+        <span class="info-label">申请人</span>
+        <span>{{.Data.Request.UserID}}</span>
+    </div>
+    <div class="info-item">
+        <span class="info-label">状态</span>
+        <span class="status-badge status-{{.Data.Request.Status}}">{{.Data.Request.Status}}</span>
+    </div>
+    <div class="info-item">
+        <span class="info-label">创建时间</span>
+        <span>{{formatTime .Data.Request.CreatedAt}}</span>
+    </div>
+    <div class="info-item">
+        <span class="info-label">更新时间</span>
+        <span>{{formatTime .Data.Request.UpdatedAt}}</span>
+    </div>
+</div>
+
+{{/* Success banner when all files are signed (request status is done). */}}
+{{if eq .Data.Request.Status "done"}}
+<div class="alert alert-success mt-2">
+    所有文件已签名完成，申请已关闭。
+</div>
+{{end}}
+
+<section class="mt-3">
+    <h3>文件列表</h3>
+    {{if .Data.Files}}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>文件名</th>
+                <th>类型</th>
+                <th>大小</th>
+                <th>状态</th>
+                <th>操作</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{range .Data.Files}}
+            <tr>
+                <td>{{.OriginalName}}</td>
+                <td>{{upper .FileType}}</td>
+                <td>{{formatSize .SizeBytes}}</td>
+                <td><span class="status-badge status-{{.Status}}">{{.Status}}</span></td>
+                <td>
+                    {{$url := index $.Data.DownloadURLs .ID}}
+                    {{if $url}}
+                    <a href="{{$url}}" class="btn btn-sm btn-primary" target="_blank">
+                        {{if eq .Status "signed"}}下载已签文件{{else}}下载源文件{{end}}
+                    </a>
+                    {{end}}
+                    {{if eq .Status "signed"}}
+                        {{if .SignedSizeBytes}}
+                        <span class="text-secondary">已签大小: {{formatSize (deref .SignedSizeBytes)}}</span>
+                        {{end}}
+                    {{end}}
+                    {{if eq .Status "canceled"}}
+                        {{if .FailReason}}
+                        <span class="text-secondary">原因: {{deref .FailReason}}</span>
+                        {{end}}
+                    {{end}}
+                </td>
+            </tr>
+            {{end}}
+        </tbody>
+    </table>
+    {{else}}
+    <p class="text-secondary">暂无文件</p>
+    {{end}}
+</section>
+
+<section class="mt-3">
+    <h3>邮件通知模板</h3>
+    <pre class="email-preview" id="emailPreview">主题: 签名申请 - {{.Data.Request.Name}}
+
+各位好，
+
+请协助处理以下签名申请：
+
+申请名称：{{.Data.Request.Name}}
+申请人：  {{.Data.Request.UserID}}
+申请链接：{{.ExternalURL}}/sign/{{.Data.Request.ID}}
+CLI 拉取：{{.ExternalURL}}/cli/sign/{{.Data.Request.ID}}/files
+
+文件列表：
+{{range $i, $f := .Data.Files}}{{add $i 1}}. {{$f.OriginalName}}   ({{upper $f.FileType}}, {{formatSize $f.SizeBytes}})
+{{end}}
+谢谢。</pre>
+    <button class="btn btn-sm btn-outline mt-1"
+            onclick="copyToClipboard(document.getElementById('emailPreview').textContent, this)">
+        复制邮件正文
+    </button>
+</section>
+{{end}}
+{{template "layout" .}}
